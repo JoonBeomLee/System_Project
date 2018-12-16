@@ -1,0 +1,12 @@
+#!/bin/bash
+
+SERVER='210.115.229.91'
+USER='root'
+PASS='dblab2316'
+
+user root dblab2316
+prompt
+dir
+put test.sh
+bye
+

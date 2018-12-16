@@ -1,0 +1,29 @@
+#!/bin/bash
+SERVER='210.115.229.91'
+USER='joonb'
+PASS='dblab2316'
+
+echo $1 $2
+
+
+if [ $1 -eq 1 ]; then
+	echo "upload start"
+	ftp -v -n  << script1
+		open $SERVER
+		user $USER $PASS
+		prompt
+		put $2
+		bye
+	script1
+fi
+
+if [ $1 -eq 2 ];then
+	echo "download start"
+	ftp -v -n << script2
+		open $SERVER
+		user $USER $PASS
+		prompt
+		get $2
+		bye
+	script2
+fi

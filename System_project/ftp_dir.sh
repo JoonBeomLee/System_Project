@@ -1,0 +1,13 @@
+#!/bin/bash
+SERVER='210.115.229.91'
+USER='joonb'
+PASS='dblab2316'
+
+ftp -n <<- SCRIPT1
+open $SERVER
+user $USER $PASS
+prompt
+cd $1
+dir
+bye
+SCRIPT1

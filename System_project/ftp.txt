@@ -1,0 +1,13 @@
+Connected to 210.115.229.91 (210.115.229.91).
+220 (vsFTPd 2.2.2)
+331 Please specify the password.
+230 Login successful.
+Interactive mode off.
+227 Entering Passive Mode (210,115,229,91,249,90).
+150 Here comes the directory listing.
+drwxr-xr-x    2 0        0            4096 Dec 16 16:54 System_project
+drwxr-xr-x    2 0        0            4096 Dec 16 16:26 System_project2
+drwxr-xr-x    2 0        0            4096 Dec 16 16:17 System_project3
+-rw-r--r--    1 500      500           333 Dec 15 18:02 test.sh~
+226 Directory send OK.
+221 Goodbye.

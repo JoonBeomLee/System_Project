@@ -1,0 +1,214 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <pthread.h>
+
+#define BUF_SIZE 512
+#define MAX_CLNT 256
+#define NAME_SIZE 100
+#define MSG_SIZE 256 // 한번에 읽을 수 있는 메세지 수
+
+struct MSG {
+	char name[NAME_SIZE];
+	char msg[MSG_SIZE];
+	char file[MSG_SIZE];
+	char cmd[MSG_SIZE];
+};
+struct MSG user_msg;
+
+void * handle_clnt(void * arg);
+void send_msg(struct MSG packet, int len,int clnt_sock);
+void error_handling(char * msg);
+
+int clnt_cnt=0;
+int clnt_socks[MAX_CLNT];
+int stop_arr[MAX_CLNT][2];
+int stop_arr_idx;
+
+char clnt_info[200] = { 0, };
+pthread_mutex_t mutx;
+
+int main(int argc, char *argv[])
+{
+	int serv_sock, clnt_sock;
+	struct sockaddr_in serv_adr, clnt_adr;
+	int clnt_adr_sz;
+	pthread_t t_id;
+
+	pthread_mutex_init(&mutx, NULL);
+	serv_sock=socket(PF_INET, SOCK_STREAM, 0);
+
+	memset(&serv_adr, 0, sizeof(serv_adr));
+	serv_adr.sin_family=AF_INET;
+	serv_adr.sin_addr.s_addr=htonl(INADDR_ANY);
+	serv_adr.sin_port=htons(9743);
+
+	if(bind(serv_sock, (struct sockaddr*) &serv_adr, sizeof(serv_adr))==-1)
+		error_handling("bind() error");
+	if(listen(serv_sock, 5)==-1)
+		error_handling("listen() error");
+
+	printf("======= SERVER START ==========\n");
+
+	while(1)
+	{
+		// 클라이언트 소켓 생성
+		clnt_adr_sz=sizeof(clnt_adr);
+		clnt_sock=accept(serv_sock, (struct sockaddr*)&clnt_adr,&clnt_adr_sz);
+
+		pthread_mutex_lock(&mutx);
+		// 소켓 배열에 각 클라이언트의 소켓 정보를 저장
+		// clnt 유저 수
+		// 소켓 배열에 각클라이언트의 실행(stop) 정보 저장
+		stop_arr[clnt_cnt][0] = clnt_sock;
+		stop_arr[clnt_cnt][1] = 0;
+		clnt_socks[clnt_cnt++]=clnt_sock;
+
+		pthread_mutex_unlock(&mutx);
+
+		pthread_create(&t_id, NULL, handle_clnt, (void*)&clnt_sock);
+		pthread_detach(t_id);
+		printf("Connected client IP: %s \n", inet_ntoa(clnt_adr.sin_addr));
+	}
+	close(serv_sock);
+	return 0;
+}
+
+/*생성된 스레드가 처리하는 함수*/
+void * handle_clnt(void * arg)
+{
+	int clnt_sock = *((int*)arg);
+	int str_len = 0, i, k = 0;
+	char msg[BUF_SIZE] = { 0, };
+	char newclnt[30];
+	char clnt_list[100];
+	char clnt_stop[100];
+	char clnt_close[100];
+	int list = 0;
+
+	/*새로운 클라이언트 접속 시에 다른 클라이언트들에게 접속 정보 제공*/
+	pthread_mutex_lock(&mutx);
+	/*
+	read(clnt_sock, msg, sizeof(msg));
+	sprintf(newclnt, "New client %s!", msg);
+	*/
+	read(clnt_sock, (struct MSG *)&user_msg, sizeof(user_msg));
+	sprintf(user_msg.msg, "New client %s! \n", msg);
+
+	for (i = 0; i < clnt_cnt; i++){
+		if (clnt_sock == clnt_socks[i])
+			continue;
+		else
+			write(clnt_socks[i], (void *)&user_msg, sizeof(user_msg));
+	}
+
+	/*새로운 클라이언트 접속 시에 해당 클라이언트에게 대화방 정보 제공*/
+	strcat(clnt_info, user_msg.name);
+	sprintf(clnt_list, "현재 접속 중인 클라이언트(총 %d 명)" , clnt_cnt);
+	write(clnt_sock, (void *)&user_msg, sizeof(user_msg));
+	pthread_mutex_unlock(&mutx);
+
+	while ((str_len = read(clnt_sock, (struct MSG *)&user_msg, sizeof(user_msg))) != 0){
+		/*클라이언트 접속 종료 시 다른 클라이언트들에게 접속 종료 정보 제공*/
+		if (strstr(user_msg.cmd,"@bye")){
+			pthread_mutex_lock(&mutx);
+			sprintf(user_msg.msg, "%s 님이 시스템을 종료 하였습니다.",  user_msg.name);
+			/*
+			for (i = 0; i < clnt_cnt; i++){
+				write(clnt_socks[i], (void *)&user_msg, sizeof(user_msg));
+			}
+			*/
+			send_msg(user_msg, str_len, clnt_sock);
+			pthread_mutex_unlock(&mutx);
+		}
+		else if(strstr(user_msg.cmd,"@list")){
+			pthread_mutex_lock(&mutx);
+		 	sprintf(user_msg.msg, "===현재 접속 중인 클라이언트 List=== \n %s \n", clnt_info);
+			write(clnt_sock, (void *)&user_msg, sizeof(user_msg));
+			pthread_mutex_unlock(&mutx);
+		}
+		else if(strstr(user_msg.cmd,"@continue")){
+			pthread_mutex_lock(&mutx);
+			sprintf(user_msg.msg, "=== stop 된 클라이언트의 상태 해제 ===\n");
+			write(clnt_sock, (void *)&user_msg, sizeof(user_msg));
+
+			for(i = 0; i < clnt_cnt; i++){
+				if(clnt_sock == stop_arr[i][0]) stop_arr[i][1] = 0;
+			}
+			pthread_mutex_unlock(&mutx);
+
+		}
+		else if(strstr(user_msg.cmd,"@stop")){
+			pthread_mutex_lock(&mutx);
+			sprintf(user_msg.msg, "=== 현재 해당 클라이언트는 Stop 상태 === \n");
+			write(clnt_sock, (void *)&user_msg, sizeof(user_msg));
+
+			for(i = 0; i < clnt_cnt; i++)
+			{
+				if(clnt_sock == stop_arr[i][0]) stop_arr[i][1] = 1;
+			}
+			pthread_mutex_unlock(&mutx);
+		}
+		else if(strstr(user_msg.cmd, "@ftp")){
+			pthread_mutex_lock(&mutx);
+		 	sprintf(user_msg.msg, "=== %s 가 file 전송중  === \n %s \n", user_msg.name, user_msg.file);
+			send_msg(user_msg, str_len, clnt_sock);
+			pthread_mutex_unlock(&mutx);
+		}
+		else{
+			send_msg(user_msg, str_len, clnt_sock);
+		}
+		send_msg(user_msg, str_len, clnt_sock);
+	}
+
+
+	/*클라이언트 접속 종료시 전역변수 처리 과정*/
+	pthread_mutex_lock(&mutx);
+	for(i=0; i<clnt_cnt; i++)
+	{
+		if (clnt_sock == clnt_socks[i])
+		{
+			while (i < clnt_cnt - 1){
+				stop_arr[i][0] = stop_arr[i+1][0];
+				stop_arr[i][1] = stop_arr[i+1][1];
+				clnt_socks[i] = clnt_socks[i + 1];
+				i++;
+			}
+			break;
+		}
+	}
+	clnt_cnt--;
+	pthread_mutex_unlock(&mutx);
+
+	close(clnt_sock);
+
+	return NULL;
+}
+
+/*클라이언트에게 메세지 전송*/
+void send_msg(struct MSG packet, int len,int clnt_sock)
+{
+	int i;
+	/*입력한 메세지는 본인을 제외한 클라이언트들에게 전송되도록 설정*/
+	pthread_mutex_lock(&mutx);
+	for (i = 0; i < clnt_cnt; i++){
+		if (clnt_sock == clnt_socks[i])
+			continue;
+		if (stop_arr[i][0] == clnt_sock || stop_arr[i][1] == 1)
+			continue;
+		else
+			write(clnt_socks[i], (void *)&packet, sizeof(packet));
+	}
+	pthread_mutex_unlock(&mutx);
+}
+void error_handling(char * msg)
+{
+	fputs(msg, stderr);
+	fputc('\n', stderr);
+	exit(1);
+}
+
